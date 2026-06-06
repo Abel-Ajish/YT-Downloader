@@ -205,6 +205,15 @@ class AppInstaller(ctk.CTk):
 
     def run_install_process(self):
         try:
+            # 0. Check if already installed and ask to upgrade/reinstall
+            if (INSTALL_DIR / "YT-Downloader.exe").exists():
+                self.log("Existing installation detected.")
+                if not messagebox.askyesno("Already Installed", f"{APP_NAME} is already installed. Do you want to upgrade/reinstall it?"):
+                    self.log("Installation cancelled by user.")
+                    self.install_btn.configure(state="normal", text="Start Installation")
+                    return
+                self.log("Proceeding with upgrade/reinstall...")
+
             if not self.check_python():
                 if messagebox.askyesno("Python Missing", "Python is required but not found. Install it now?"):
                     if not self.install_python():
