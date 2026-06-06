@@ -25,7 +25,7 @@ var/
 
 # PyInstaller
 *.manifest
-*.spec
+# *.spec  <-- Removed to allow build specs in repo
 
 # Installer temp files
 python_installer.exe
