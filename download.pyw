@@ -23,7 +23,7 @@ logger = setup_logging()
 
 # Constants
 GITHUB_REPO = "Abel-Ajish/YT-Downloader"
-VERSION = "v1.0.2"
+VERSION = "v1.0.3"
 
 class MegaDownloader(ctk.CTk):
     def __init__(self):
@@ -34,11 +34,23 @@ class MegaDownloader(ctk.CTk):
         
         # Window Setup
         self.title("Youtube Audio/Video Downloader")
-        geometry = self.settings_mgr.get("window_geometry")
+        
+        # Calculate Half Screen Size
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        half_width = screen_width // 2
+        
+        # Load Settings or Default to Half Screen
+        geometry = self.settings_mgr.get("window_geometry", f"{half_width}x{screen_height}+0+0")
         self.geometry(geometry)
-        self.minsize(600, 700)
+        self.minsize(700, 750)
         self.resizable(True, True)
 
+        # Force Fullscreen on first launch if not already set
+        if not self.settings_mgr.get("has_launched_before", False):
+            self.after(100, lambda: self.state('zoomed'))
+            self.settings_mgr.save_settings({"has_launched_before": True})
+        
         # Apply Theme
         self.appearance_mode = self.settings_mgr.get("appearance_mode")
         ctk.set_appearance_mode(self.appearance_mode)
@@ -66,11 +78,15 @@ class MegaDownloader(ctk.CTk):
             logger.warning("Dependencies check failed or user opted out.")
 
     def _build_ui(self):
+        # --- Main Container (Non-Scrollable for Full Screen Density) ---
+        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_container.pack(fill="both", expand=True, padx=5, pady=5)
+
         # Header & Theme Toggle
-        self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.header_frame.pack(pady=(15, 5), fill="x", padx=40)
+        self.header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.header_frame.pack(pady=(10, 2), fill="x", padx=40)
         
-        self.title_lbl = ctk.CTkLabel(self.header_frame, text="Youtube Audio/Video Downloader", font=("Arial", 20, "bold"))
+        self.title_lbl = ctk.CTkLabel(self.header_frame, text="Youtube Audio/Video Downloader", font=("Arial", 18, "bold"))
         self.title_lbl.pack(side="left")
         
         self.theme_switch = ctk.CTkSwitch(self.header_frame, text="Dark Mode", command=self.toggle_theme)
@@ -80,119 +96,148 @@ class MegaDownloader(ctk.CTk):
             self.theme_switch.deselect()
         self.theme_switch.pack(side="right")
 
-        # 1. URL Input Section
-        self.url_label = ctk.CTkLabel(self, text="YouTube URL Link (Video, Short, Playlist, or Audio):", font=("Arial", 12, "bold"))
-        self.url_label.pack(anchor="w", padx=40, pady=(10, 2))
+        # --- Top Info Bar ---
+        self.top_info_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.top_info_frame.pack(pady=(0, 5), fill="x", padx=40)
         
-        self.url_entry = ctk.CTkEntry(self, placeholder_text="https://www.youtube.com/watch?v=...")
-        self.url_entry.pack(pady=5, padx=40, fill="x")
+        self.version_lbl = ctk.CTkLabel(self.top_info_frame, text=VERSION, font=("Arial", 10), text_color="gray")
+        self.version_lbl.pack(side="left")
+        
+        self.update_btn = ctk.CTkButton(self.top_info_frame, text="Check for Updates", width=120, height=24, font=("Arial", 10, "bold"), command=self.check_updates)
+        self.update_btn.pack(side="right")
+
+        # 1. URL Input Section
+        self.url_label = ctk.CTkLabel(self.main_container, text="YouTube URL Link:", font=("Arial", 11, "bold"))
+        self.url_label.pack(anchor="w", padx=40, pady=(5, 0))
+        
+        self.url_entry = ctk.CTkEntry(self.main_container, placeholder_text="https://www.youtube.com/watch?v=...", height=28)
+        self.url_entry.pack(pady=2, padx=40, fill="x")
         self.url_entry.bind("<KeyRelease>", self.on_url_change)
+        self.url_entry.bind("<<Paste>>", lambda e: self.after(10, self.on_url_change))
 
         # 1.5 Metadata Preview Section
-        self.preview_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.preview_frame.pack(pady=5, padx=40, fill="x")
-        self.preview_frame.pack_forget() # Hide by default
+        self.preview_frame = ctk.CTkFrame(self.main_container, fg_color="transparent", height=60)
+        self.preview_frame.pack(pady=2, padx=40, fill="x")
+        self.preview_frame.pack_forget() 
 
-        self.thumb_label = ctk.CTkLabel(self.preview_frame, text="", width=120, height=68)
-        self.thumb_label.pack(side="left", padx=(0, 15))
+        self.thumb_label = ctk.CTkLabel(self.preview_frame, text="", width=100, height=56)
+        self.thumb_label.pack(side="left", padx=(0, 10))
 
         self.info_frame = ctk.CTkFrame(self.preview_frame, fg_color="transparent")
         self.info_frame.pack(side="left", fill="both", expand=True)
 
-        self.video_title_lbl = ctk.CTkLabel(self.info_frame, text="Video Title", font=("Arial", 12, "bold"), anchor="w", wraplength=400)
+        self.video_title_lbl = ctk.CTkLabel(self.info_frame, text="Video Title", font=("Arial", 11, "bold"), anchor="w", wraplength=500)
         self.video_title_lbl.pack(fill="x")
 
-        self.video_duration_lbl = ctk.CTkLabel(self.info_frame, text="Duration: 00:00", font=("Arial", 11), text_color="gray", anchor="w")
+        self.video_duration_lbl = ctk.CTkLabel(self.info_frame, text="Duration: 00:00", font=("Arial", 10), text_color="gray", anchor="w")
         self.video_duration_lbl.pack(fill="x")
 
         # 2. Storage Directory Configuration
-        self.loc_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.loc_frame.pack(pady=10, fill="x", padx=40)
+        self.loc_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.loc_frame.pack(pady=5, fill="x", padx=40)
         
         display_path = self.save_dir
-        if len(display_path) > 45:
-            display_path = f"...{display_path[-45:]}"
+        if len(display_path) > 50:
+            display_path = f"...{display_path[-50:]}"
             
-        self.loc_label = ctk.CTkLabel(self.loc_frame, text=f"Save Folder: {display_path}", text_color="gray")
+        self.loc_label = ctk.CTkLabel(self.loc_frame, text=f"Save Folder: {display_path}", text_color="gray", font=("Arial", 10))
         self.loc_label.pack(side="left", fill="x", expand=True, anchor="w")
         
-        self.open_folder_btn = ctk.CTkButton(self.loc_frame, text="📂 Open Folder", width=110, fg_color="#495057", hover_color="#343a40", command=self.quick_open_folder)
+        self.open_folder_btn = ctk.CTkButton(self.loc_frame, text="📂 Folder", width=90, height=28, fg_color="#495057", hover_color="#343a40", command=self.quick_open_folder)
         self.open_folder_btn.pack(side="right", padx=(0, 10))
         
-        self.loc_btn = ctk.CTkButton(self.loc_frame, text="Change Location", width=120, command=self.choose_folder)
+        self.loc_btn = ctk.CTkButton(self.loc_frame, text="Change", width=90, height=28, command=self.choose_folder)
         self.loc_btn.pack(side="right")
 
         # 3. Features & Settings Dashboard
-        self.settings_frame = ctk.CTkFrame(self)
-        self.settings_frame.pack(pady=15, padx=40, fill="both", expand=True)
+        self.settings_frame = ctk.CTkFrame(self.main_container)
+        self.settings_frame.pack(pady=5, padx=40, fill="x")
 
-        # Left Column: Formats
         self.left_frame = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
-        self.left_frame.pack(side="left", fill="both", expand=True, padx=15, pady=15)
+        self.left_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
 
-        self.type_label = ctk.CTkLabel(self.left_frame, text="1. Target Output Type:", font=("Arial", 11, "bold"))
-        self.type_label.pack(anchor="w", pady=2)
-        self.type_menu = ctk.CTkOptionMenu(self.left_frame, values=["Video (.MP4/.MKV)", "Audio Only (.MP3/.M4A)", "Thumbnail Only (.JPG)"], command=self.toggle_type)
+        self.type_label = ctk.CTkLabel(self.left_frame, text="Output Type:", font=("Arial", 10, "bold"))
+        self.type_label.pack(anchor="w")
+        self.type_menu = ctk.CTkOptionMenu(self.left_frame, values=["Video (.MP4/.MKV)", "Audio Only (.MP3/.M4A)", "Thumbnail Only (.JPG)"], command=self.toggle_type, height=26)
         self.type_menu.set(self.settings_mgr.get("last_type"))
-        self.type_menu.pack(fill="x", pady=(0, 15))
+        self.type_menu.pack(fill="x", pady=(0, 10))
 
-        self.quality_label = ctk.CTkLabel(self.left_frame, text="2. Resolution / Quality Bitrate:", font=("Arial", 11, "bold"))
-        self.quality_label.pack(anchor="w", pady=2)
-        self.quality_menu = ctk.CTkOptionMenu(self.left_frame, values=["Best Available", "1080p (FHD)", "720p (HD)", "480p", "360p"])
+        self.quality_label = ctk.CTkLabel(self.left_frame, text="Quality:", font=("Arial", 10, "bold"))
+        self.quality_label.pack(anchor="w")
+        self.quality_menu = ctk.CTkOptionMenu(self.left_frame, values=["Best Available", "1080p (FHD)", "720p (HD)", "480p", "360p"], height=26)
         self.quality_menu.set(self.settings_mgr.get("last_quality"))
         self.quality_menu.pack(fill="x")
 
-        # Right Column: Power User Switches
         self.right_frame = ctk.CTkFrame(self.settings_frame, fg_color="transparent")
-        self.right_frame.pack(side="right", fill="both", expand=True, padx=15, pady=15)
+        self.right_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
-        self.opts_label = ctk.CTkLabel(self.right_frame, text="3. Extra Modifiers:", font=("Arial", 11, "bold"))
-        self.opts_label.pack(anchor="w", pady=2)
+        self.post_action_label = ctk.CTkLabel(self.right_frame, text="After Download:", font=("Arial", 10, "bold"))
+        self.post_action_label.pack(anchor="w")
+        self.post_action_menu = ctk.CTkOptionMenu(self.right_frame, values=["Do Nothing", "Open File", "Open Folder", "Shutdown PC"], height=26)
+        self.post_action_menu.set(self.settings_mgr.get("post_action", "Do Nothing"))
+        self.post_action_menu.pack(fill="x")
 
-        self.playlist_switch = ctk.CTkSwitch(self.right_frame, text="Download Full Playlists")
+        # 3.5 Advanced Settings Section (Collapsible)
+        self.adv_header = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.adv_header.pack(pady=5, padx=40, fill="x")
+        
+        self.adv_toggle_btn = ctk.CTkButton(self.adv_header, text="▶ Show Advanced Settings", width=200, height=24, font=("Arial", 10, "bold"), fg_color=("gray85", "gray25"), text_color=("black", "white"), hover_color=("gray75", "gray35"), border_width=1, command=self.toggle_advanced)
+        self.adv_toggle_btn.pack(anchor="center")
+
+        self.adv_frame = ctk.CTkFrame(self.main_container)
+        # self.adv_frame is NOT packed by default
+        
+        self.adv_content = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
+        self.adv_content.pack(fill="x", padx=10, pady=10)
+
+        self.adv_left = ctk.CTkFrame(self.adv_content, fg_color="transparent")
+        self.adv_left.pack(side="left", fill="both", expand=True)
+
+        self.codec_label = ctk.CTkLabel(self.adv_left, text="Codec:", font=("Arial", 9, "bold"))
+        self.codec_label.pack(anchor="w")
+        self.codec_menu = ctk.CTkOptionMenu(self.adv_left, values=["H.264 (Most Compatible)", "H.265 (High Efficiency)", "VP9 (Best for YouTube)"], height=24, font=("Arial", 10))
+        self.codec_menu.set(self.settings_mgr.get("preferred_codec", "H.264 (Most Compatible)"))
+        self.codec_menu.pack(fill="x")
+
+        self.adv_right = ctk.CTkFrame(self.adv_content, fg_color="transparent")
+        self.adv_right.pack(side="right", fill="both", expand=True, padx=(10, 0))
+
+        self.playlist_switch = ctk.CTkSwitch(self.adv_right, text="Playlist", font=("Arial", 9))
         if self.settings_mgr.get("playlist_enabled"): self.playlist_switch.select()
-        self.playlist_switch.pack(anchor="w", pady=6)
+        self.playlist_switch.pack(anchor="w")
 
-        self.sub_switch = ctk.CTkSwitch(self.right_frame, text="Embed English Subtitles")
+        self.sub_switch = ctk.CTkSwitch(self.adv_right, text="Subtitles", font=("Arial", 9))
         if self.settings_mgr.get("subtitles_enabled"): self.sub_switch.select()
-        self.sub_switch.pack(anchor="w", pady=6)
+        self.sub_switch.pack(anchor="w")
 
-        self.compat_switch = ctk.CTkSwitch(self.right_frame, text="No-FFmpeg Safe Fallback")
+        self.compat_switch = ctk.CTkSwitch(self.adv_right, text="Safe Mode", font=("Arial", 9))
         if self.settings_mgr.get("no_ffmpeg_enabled"): self.compat_switch.select()
-        self.compat_switch.pack(anchor="w", pady=6)
-        self.compat_tip = ctk.CTkLabel(self.right_frame, text="*Enable if conversions fail or throw errors", font=("Arial", 10, "italic"), text_color="gray")
-        self.compat_tip.pack(anchor="w", padx=5)
+        self.compat_switch.pack(anchor="w")
 
         # 4. Progress Statistics Tracking Panel
-        self.stats_frame = ctk.CTkFrame(self, height=60, fg_color="transparent")
-        self.stats_frame.pack(fill="x", padx=40, pady=5)
+        self.stats_frame = ctk.CTkFrame(self.main_container, height=40, fg_color="transparent")
+        self.stats_frame.pack(fill="x", padx=40, pady=2)
         
-        self.speed_lbl = ctk.CTkLabel(self.stats_frame, text="Speed: --", font=("Arial", 11), text_color="gray")
+        self.speed_lbl = ctk.CTkLabel(self.stats_frame, text="Speed: --", font=("Arial", 10), text_color="gray")
         self.speed_lbl.pack(side="left", padx=10)
         
-        self.eta_lbl = ctk.CTkLabel(self.stats_frame, text="ETA: --", font=("Arial", 11), text_color="gray")
+        self.eta_lbl = ctk.CTkLabel(self.stats_frame, text="ETA: --", font=("Arial", 10), text_color="gray")
         self.eta_lbl.pack(side="right", padx=10)
 
         # 5. Core Execution Action Controls
-        self.download_btn = ctk.CTkButton(self, text="⚡ EXECUTE DOWNLOAD TASK", font=("Arial", 14, "bold"), height=50, fg_color="#2b8a3e", hover_color="#237032", command=self.trigger_download)
-        self.download_btn.pack(pady=(5, 5), padx=40, fill="x")
+        self.download_btn = ctk.CTkButton(self.main_container, text="⚡ EXECUTE DOWNLOAD TASK", font=("Arial", 14, "bold"), height=45, fg_color="#2b8a3e", hover_color="#237032", command=self.trigger_download)
+        self.download_btn.pack(pady=2, padx=40, fill="x")
 
-        self.progress_bar = ctk.CTkProgressBar(self)
-        self.progress_bar.pack(pady=10, padx=40, fill="x")
+        self.progress_bar = ctk.CTkProgressBar(self.main_container, height=12)
+        self.progress_bar.pack(pady=5, padx=40, fill="x")
         self.progress_bar.set(0)
 
-        self.status_label = ctk.CTkLabel(self, text="System Standby - Ready", text_color="#1c7ed6", font=("Arial", 12, "bold"))
-        self.status_label.pack(pady=(0, 15))
+        self.status_label = ctk.CTkLabel(self.main_container, text="System Standby - Ready", text_color="#1c7ed6", font=("Arial", 11, "bold"))
+        self.status_label.pack(pady=2)
 
-        # 6. Footer (Version & Updates)
-        self.footer_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.footer_frame.pack(side="bottom", fill="x", padx=20, pady=10)
-        
-        self.version_lbl = ctk.CTkLabel(self.footer_frame, text="v1.0.0", font=("Arial", 10), text_color="gray")
-        self.version_lbl.pack(side="left")
-        
-        self.update_btn = ctk.CTkButton(self.footer_frame, text="Check for Updates", width=120, height=24, font=("Arial", 10), command=self.check_updates)
-        self.update_btn.pack(side="right")
+        # 5.5 Download History Button
+        self.history_btn = ctk.CTkButton(self.main_container, text="📜 View Download History", height=28, fg_color=("gray85", "gray25"), text_color=("black", "white"), hover_color=("gray75", "gray35"), border_width=1, command=self.show_history, font=("Arial", 10))
+        self.history_btn.pack(pady=(0, 10))
 
     def on_url_change(self, event=None):
         url = self.url_entry.get().strip()
@@ -203,11 +248,18 @@ class MegaDownloader(ctk.CTk):
             self.preview_frame.pack_forget()
             return
 
+        # Show a "Loading" state immediately if it looks like a full link
+        if len(url) > 15: 
+            self.video_title_lbl.configure(text="Fetching video details...")
+            self.video_duration_lbl.configure(text="Please wait...")
+            self.thumb_label.configure(image=None, text="⌛")
+            self.preview_frame.pack(pady=2, padx=40, fill="x", after=self.url_entry)
+
         self.current_metadata_url = url
-        # Debounce to avoid too many requests while typing
+        # Debounce to avoid too many requests while typing - reduced to 300ms for "immediate" feel
         if hasattr(self, '_metadata_job'):
             self.after_cancel(self._metadata_job)
-        self._metadata_job = self.after(1000, lambda: threading.Thread(target=self.fetch_metadata, args=(url,), daemon=True).start())
+        self._metadata_job = self.after(300, lambda: threading.Thread(target=self.fetch_metadata, args=(url,), daemon=True).start())
 
     def fetch_metadata(self, url):
         try:
@@ -267,6 +319,58 @@ class MegaDownloader(ctk.CTk):
         
         # Insert preview after URL section
         self.preview_frame.pack(pady=5, padx=40, fill="x", after=self.url_entry)
+
+    def show_history(self):
+        history_window = ctk.CTkToplevel(self)
+        history_window.title("Download History")
+        history_window.geometry("500x400")
+        history_window.attributes("-topmost", True)
+
+        history = self.settings_mgr.get("download_history", [])
+        
+        label = ctk.CTkLabel(history_window, text="Recent Downloads", font=("Arial", 16, "bold"))
+        label.pack(pady=10)
+
+        scroll_frame = ctk.CTkScrollableFrame(history_window, width=450, height=300)
+        scroll_frame.pack(padx=20, pady=10, fill="both", expand=True)
+
+        if not history:
+            ctk.CTkLabel(scroll_frame, text="No history yet.").pack(pady=20)
+        else:
+            for item in reversed(history):
+                item_frame = ctk.CTkFrame(scroll_frame)
+                item_frame.pack(fill="x", pady=5, padx=5)
+                
+                title = item.get("title", "Unknown")
+                date = item.get("date", "")
+                
+                ctk.CTkLabel(item_frame, text=title, font=("Arial", 11, "bold"), anchor="w").pack(side="left", padx=10, fill="x", expand=True)
+                ctk.CTkLabel(item_frame, text=date, font=("Arial", 10), text_color="gray").pack(side="right", padx=10)
+
+        clear_btn = ctk.CTkButton(history_window, text="Clear History", fg_color="#c92a2a", hover_color="#a52828", 
+                                 command=lambda: [self.settings_mgr.save_settings({"download_history": []}), history_window.destroy(), self.show_history()])
+        clear_btn.pack(pady=10)
+
+    def save_to_history(self, title):
+        history = self.settings_mgr.get("download_history", [])
+        history.append({
+            "title": title,
+            "date": time.strftime("%Y-%m-%d %H:%M"),
+            "url": self.url_entry.get()
+        })
+        # Keep only last 50 items
+        if len(history) > 50:
+            history = history[-50:]
+        self.settings_mgr.save_settings({"download_history": history})
+
+    def toggle_advanced(self):
+        if self.adv_frame.winfo_viewable():
+            self.adv_frame.pack_forget()
+            self.adv_toggle_btn.configure(text="▶ Show Advanced Settings")
+        else:
+            # Insert after the header button
+            self.adv_frame.pack(pady=5, padx=40, fill="x", after=self.adv_header)
+            self.adv_toggle_btn.configure(text="▼ Hide Advanced Settings")
 
     def toggle_theme(self):
         if self.theme_switch.get() == 1:
@@ -399,11 +503,19 @@ class MegaDownloader(ctk.CTk):
                     }],
                 })
             else:
-                if "1080p" in quality: res_str = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-                elif "720p" in quality: res_str = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-                elif "480p" in quality: res_str = "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-                elif "360p" in quality: res_str = "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-                else: res_str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                codec_choice = self.codec_menu.get()
+                if "H.264" in codec_choice:
+                    vcodec = "h264"
+                elif "H.265" in codec_choice:
+                    vcodec = "h265"
+                else:
+                    vcodec = "vp9"
+
+                if "1080p" in quality: res_str = f"bestvideo[height<=1080][vcodec^={vcodec}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                elif "720p" in quality: res_str = f"bestvideo[height<=720][vcodec^={vcodec}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                elif "480p" in quality: res_str = f"bestvideo[height<=480][vcodec^={vcodec}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                elif "360p" in quality: res_str = f"bestvideo[height<=360][vcodec^={vcodec}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                else: res_str = f"bestvideo[vcodec^={vcodec}][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
                 ydl_opts['format'] = res_str
 
         try:
@@ -438,7 +550,8 @@ class MegaDownloader(ctk.CTk):
                             raise FileNotFoundError(f"Could not locate the downloaded file: {os.path.basename(file_path)}")
                         
                     self.status_label.configure(text="Finished! Launching Media Player...", text_color="#2b8a3e")
-                    self.open_media(file_path)
+                    self.save_to_history(info.get('title', 'Unknown'))
+                    self.perform_post_action(file_path)
                     
         except Exception as e:
             logger.error(f"Download attempt failed: {e}")
@@ -482,6 +595,20 @@ class MegaDownloader(ctk.CTk):
         except Exception as e:
             logger.error(f"Error opening media: {e}")
 
+    def perform_post_action(self, file_path):
+        action = self.post_action_menu.get()
+        if action == "Open File":
+            self.open_media(file_path)
+        elif action == "Open Folder":
+            self.open_media(os.path.dirname(file_path), is_folder=True)
+        elif action == "Shutdown PC":
+            current_os = platform.system()
+            if current_os == "Windows":
+                os.system("shutdown /s /t 60")
+                messagebox.showinfo("Shutdown", "PC will shutdown in 60 seconds. Save your work!")
+            else:
+                self.log("Shutdown not supported on this OS via this app.")
+
     def check_updates(self):
         def run_check():
             try:
@@ -515,6 +642,8 @@ class MegaDownloader(ctk.CTk):
             "window_geometry": self.geometry(),
             "last_quality": self.quality_menu.get(),
             "last_type": self.type_menu.get(),
+            "preferred_codec": self.codec_menu.get(),
+            "post_action": self.post_action_menu.get(),
             "playlist_enabled": self.playlist_switch.get() == 1,
             "subtitles_enabled": self.sub_switch.get() == 1,
             "no_ffmpeg_enabled": self.compat_switch.get() == 1

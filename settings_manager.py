@@ -38,5 +38,5 @@ class SettingsManager:
         except Exception:
             pass
 
-    def get(self, key):
-        return self.settings.get(key, self.defaults.get(key))
+    def get(self, key, default=None):
+        return self.settings.get(key, default if default is not None else self.defaults.get(key))
