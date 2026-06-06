@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Custom settings/logs
+.yt_downloader/
+*.log
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer temp files
+python_installer.exe
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo

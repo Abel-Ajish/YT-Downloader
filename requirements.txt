@@ -1,0 +1,7 @@
+customtkinter
+yt-dlp
+pyinstaller
+pillow
+requests
+winshell
+pywin32
