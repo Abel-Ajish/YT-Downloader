@@ -23,7 +23,7 @@ logger = setup_logging()
 
 # Constants
 GITHUB_REPO = "Abel-Ajish/YT-Downloader"
-VERSION = "v1.0.3"
+VERSION = "v1.0.4"
 
 class MegaDownloader(ctk.CTk):
     def __init__(self):
@@ -284,23 +284,22 @@ class MegaDownloader(ctk.CTk):
                 else:
                     duration_str = f"Duration: {minutes:02d}:{seconds:02d}"
                 
-                # Load thumbnail
-                ctk_image = None
+                # Load thumbnail as PIL Image (Thread-safe)
+                pil_image = None
                 if thumbnail_url:
                     try:
                         response = requests.get(thumbnail_url, timeout=5)
                         response.raise_for_status()
-                        img_data = Image.open(BytesIO(response.content))
-                        # Maintain aspect ratio for the preview
-                        img_data.thumbnail((120, 68))
-                        ctk_image = ctk.CTkImage(light_image=img_data, dark_image=img_data, size=(120, 68))
+                        pil_image = Image.open(BytesIO(response.content))
+                        # Pre-resize to maintain aspect ratio
+                        pil_image.thumbnail((120, 68))
                     except requests.exceptions.RequestException as re:
                         logger.error(f"Thumbnail network error: {re}")
                     except Exception as ie:
                         logger.error(f"Thumbnail processing error: {ie}")
 
-                # Update UI in main thread
-                self.after(0, lambda: self.update_preview(title, duration_str, ctk_image))
+                # Update UI in main thread - Pass the PIL image, not CTkImage
+                self.after(0, lambda: self.update_preview(title, duration_str, pil_image))
                 
         except yt_dlp.utils.DownloadError as de:
             logger.error(f"Metadata extraction error: {de}")
@@ -309,11 +308,16 @@ class MegaDownloader(ctk.CTk):
             logger.error(f"General metadata error: {e}")
             self.after(0, lambda: self.preview_frame.pack_forget())
 
-    def update_preview(self, title, duration, image):
+    def update_preview(self, title, duration, pil_image):
         self.video_title_lbl.configure(text=title)
         self.video_duration_lbl.configure(text=duration)
-        if image:
-            self.thumb_label.configure(image=image, text="")
+        
+        if pil_image:
+            # Create CTkImage in the main thread to avoid TclError
+            ctk_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(120, 68))
+            self.thumb_label.configure(image=ctk_image, text="")
+            # Keep a reference to prevent garbage collection
+            self.thumbnail_image = ctk_image
         else:
             self.thumb_label.configure(image=None, text="No Preview")
         
@@ -323,7 +327,7 @@ class MegaDownloader(ctk.CTk):
     def show_history(self):
         history_window = ctk.CTkToplevel(self)
         history_window.title("Download History")
-        history_window.geometry("500x400")
+        history_window.geometry("500x450")
         history_window.attributes("-topmost", True)
 
         history = self.settings_mgr.get("download_history", [])
@@ -347,9 +351,20 @@ class MegaDownloader(ctk.CTk):
                 ctk.CTkLabel(item_frame, text=title, font=("Arial", 11, "bold"), anchor="w").pack(side="left", padx=10, fill="x", expand=True)
                 ctk.CTkLabel(item_frame, text=date, font=("Arial", 10), text_color="gray").pack(side="right", padx=10)
 
-        clear_btn = ctk.CTkButton(history_window, text="Clear History", fg_color="#c92a2a", hover_color="#a52828", 
-                                 command=lambda: [self.settings_mgr.save_settings({"download_history": []}), history_window.destroy(), self.show_history()])
-        clear_btn.pack(pady=10)
+        def clear_and_refresh():
+            if messagebox.askyesno("Clear History", "Are you sure you want to delete all download history?", parent=history_window):
+                self.settings_mgr.save_settings({"download_history": []})
+                history_window.destroy()
+                self.show_history()
+
+        clear_btn = ctk.CTkButton(history_window, text="🗑️ Clear Download History", fg_color="#c92a2a", hover_color="#a52828", 
+                                 height=32, font=("Arial", 12, "bold"), command=clear_and_refresh)
+        clear_btn.pack(pady=15)
+
+    def clear_history_direct(self):
+        if messagebox.askyesno("Clear History", "Are you sure you want to delete all download history?"):
+            self.settings_mgr.save_settings({"download_history": []})
+            messagebox.showinfo("Success", "Download history has been cleared.")
 
     def save_to_history(self, title):
         history = self.settings_mgr.get("download_history", [])
@@ -481,15 +496,22 @@ class MegaDownloader(ctk.CTk):
                 'writethumbnail': True,
                 'outtmpl': os.path.join(self.save_dir, '%(title)s.%(ext)s'),
             })
+            if not no_ffmpeg:
+                ydl_opts['postprocessors'] = [{
+                    'key': 'FFmpegThumbnailsConvertor',
+                    'format': 'jpg',
+                    'when': 'before_dl'
+                }]
         
         # Audio/Video Standard & Compatibility Configuration Matrix
         elif no_ffmpeg:
             # SAFE FALLBACK MODE: Focus on compatibility over quality
             if "Audio" in media_type:
-                ydl_opts['format'] = 'bestaudio/best'
+                # Force M4A for widest compatibility without FFmpeg
+                ydl_opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
             else:
                 # Force standard MP4 compatibility
-                ydl_opts['format'] = 'best[ext=mp4]/best'
+                ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
         else:
             if "Audio" in media_type:
                 codec = 'mp3' if 'MP3' in quality else 'm4a'
@@ -531,17 +553,41 @@ class MegaDownloader(ctk.CTk):
 
                 if 'entries' in info:
                     self.status_label.configure(text="Playlist Download Successful!", text_color="#2b8a3e")
-                    self.open_media(self.save_dir, is_folder=True)
+                    self.save_to_history(info.get('title', f"Playlist: {url[:20]}..."))
+                    self.perform_post_action(self.save_dir)
                 else:
+                    # Get the final filename from info
                     file_path = ydl.prepare_filename(info)
                     
                     if "Thumbnail" in media_type:
-                        file_path = os.path.splitext(file_path)[0] + ".jpg"
-                    elif "Audio" in media_type and not no_ffmpeg:
-                        file_path = os.path.splitext(file_path)[0] + f".{codec}"
+                        # Find the actual thumbnail file as it could be .webp, .jpg, .png
+                        base_name = os.path.splitext(file_path)[0]
+                        possible_extensions = ['.jpg', '.webp', '.png', '.jpeg']
+                        found = False
+                        for ext in possible_extensions:
+                            if os.path.exists(base_name + ext):
+                                file_path = base_name + ext
+                                found = True
+                                break
+                        if not found:
+                            # Try fuzzy search in the directory
+                            possible_files = [f for f in os.listdir(self.save_dir) if f.startswith(os.path.basename(base_name))]
+                            if possible_files:
+                                file_path = os.path.join(self.save_dir, possible_files[0])
+
+                    elif "Audio" in media_type:
+                        if not no_ffmpeg:
+                            file_path = os.path.splitext(file_path)[0] + f".{codec}"
+                        else:
+                            # Without ffmpeg, the extension is whatever was downloaded
+                            if not os.path.exists(file_path):
+                                base_name = os.path.splitext(file_path)[0]
+                                possible_files = [f for f in os.listdir(self.save_dir) if f.startswith(os.path.basename(base_name))]
+                                if possible_files:
+                                    file_path = os.path.join(self.save_dir, possible_files[0])
                     
                     if not os.path.exists(file_path):
-                        # Some formats might have different extensions, attempt a fuzzy check
+                        # Final fuzzy fallback
                         base_path = os.path.splitext(file_path)[0]
                         possible_files = [f for f in os.listdir(self.save_dir) if f.startswith(os.path.basename(base_path))]
                         if possible_files:
@@ -549,7 +595,7 @@ class MegaDownloader(ctk.CTk):
                         else:
                             raise FileNotFoundError(f"Could not locate the downloaded file: {os.path.basename(file_path)}")
                         
-                    self.status_label.configure(text="Finished! Launching Media Player...", text_color="#2b8a3e")
+                    self.status_label.configure(text="Finished! Task Complete.", text_color="#2b8a3e")
                     self.save_to_history(info.get('title', 'Unknown'))
                     self.perform_post_action(file_path)
                     
@@ -584,30 +630,38 @@ class MegaDownloader(ctk.CTk):
     def open_media(self, path, is_folder=False):
         try:
             current_os = platform.system()
-            target = path if os.path.exists(path) and not is_folder else self.save_dir
+            # Resolve to absolute path
+            target = os.path.abspath(path)
             
+            if not os.path.exists(target):
+                logger.error(f"Target path does not exist: {target}")
+                return
+
             if current_os == "Windows":
                 os.startfile(target)
             elif current_os == "Darwin":
                 subprocess.call(["open", target])
             else:
                 subprocess.call(["xdg-open", target])
+            logger.info(f"Opened {'folder' if is_folder else 'file'}: {target}")
         except Exception as e:
             logger.error(f"Error opening media: {e}")
+            messagebox.showerror("Error", f"Could not open the {'folder' if is_folder else 'file'}.\n{str(e)}")
 
     def perform_post_action(self, file_path):
         action = self.post_action_menu.get()
         if action == "Open File":
             self.open_media(file_path)
         elif action == "Open Folder":
-            self.open_media(os.path.dirname(file_path), is_folder=True)
+            target = file_path if os.path.isdir(file_path) else os.path.dirname(file_path)
+            self.open_media(target, is_folder=True)
         elif action == "Shutdown PC":
             current_os = platform.system()
             if current_os == "Windows":
                 os.system("shutdown /s /t 60")
                 messagebox.showinfo("Shutdown", "PC will shutdown in 60 seconds. Save your work!")
             else:
-                self.log("Shutdown not supported on this OS via this app.")
+                logger.warning("Shutdown not supported on this OS via this app.")
 
     def check_updates(self):
         def run_check():
