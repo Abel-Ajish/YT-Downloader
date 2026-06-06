@@ -23,7 +23,7 @@ logger = setup_logging()
 
 # Constants
 GITHUB_REPO = "Abel-Ajish/YT-Downloader"
-VERSION = "v1.0.0"
+VERSION = "v1.0.1"
 
 class MegaDownloader(ctk.CTk):
     def __init__(self):
@@ -399,11 +399,11 @@ class MegaDownloader(ctk.CTk):
                     }],
                 })
             else:
-                if "1080p" in quality: res_str = "bestvideo[height<=1080]+bestaudio/best"
-                elif "720p" in quality: res_str = "bestvideo[height<=720]+bestaudio/best"
-                elif "480p" in quality: res_str = "bestvideo[height<=480]+bestaudio/best"
-                elif "360p" in quality: res_str = "bestvideo[height<=360]+bestaudio/best"
-                else: res_str = "bestvideo+bestaudio/best"
+                if "1080p" in quality: res_str = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                elif "720p" in quality: res_str = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                elif "480p" in quality: res_str = "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                elif "360p" in quality: res_str = "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+                else: res_str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
                 ydl_opts['format'] = res_str
 
         try:

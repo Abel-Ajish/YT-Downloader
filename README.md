@@ -1,7 +1,7 @@
 # YouTube Audio/Video Downloader
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/Abel-Ajish/YT-Downloader)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/Abel-Ajish/YT-Downloader/releases)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue)](https://github.com/Abel-Ajish/YT-Downloader/releases)
 [![Downloads](https://img.shields.io/badge/downloads-view-orange)](https://github.com/Abel-Ajish/YT-Downloader/releases)
 
 A production-ready, high-performance YouTube downloader with a modern UI, built with Python, CustomTkinter, and yt-dlp.
@@ -61,23 +61,6 @@ pyinstaller Setup.spec
 
 - **Windows**: Use the "Uninstall" shortcut in the application folder or run the uninstaller from the settings.
 - **macOS/Linux**: Simply delete the executable and the configuration folder at `~/.yt_downloader`.
-
-## 🛠️ Automated Releases
-
-This project uses **GitHub Actions** to automatically build and release the application. 
-
-### How to trigger a new release:
-1. Update the version in the code (if necessary).
-2. Create and push a new git tag:
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-3. GitHub Actions will automatically:
-   - Compile the Main App, Installer, and Uninstaller.
-   - Create a new Release on GitHub.
-   - Upload the `.exe` files to the release page.
-
 - **Conversions failing?** Ensure FFmpeg is installed correctly. You can enable "No-FFmpeg Safe Fallback" in the settings.
 - **Slow downloads?** Check your internet connection or try updating the app (if a new version is available).
 - **App not opening?** Check the logs at `~/.yt_downloader/logs/app.log`.

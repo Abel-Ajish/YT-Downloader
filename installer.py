@@ -147,26 +147,50 @@ class AppInstaller(ctk.CTk):
 
     def create_shortcuts(self):
         if platform.system() == "Windows":
-            self.log("Creating desktop shortcut...")
             try:
                 import winshell
                 from win32com.client import Dispatch
                 
-                desktop = Path(winshell.desktop())
-                path = desktop / f"{APP_NAME}.lnk"
-                target = INSTALL_DIR / "YT-Downloader.exe"
-                wDir = INSTALL_DIR
-                icon = INSTALL_DIR / "YT-Downloader.exe"
-                
                 shell = Dispatch('WScript.Shell')
-                shortcut = shell.CreateShortCut(str(path))
+                target = INSTALL_DIR / "YT-Downloader.exe"
+                wDir = str(INSTALL_DIR)
+                icon = str(INSTALL_DIR / "YT-Downloader.exe")
+
+                # 1. Desktop Shortcut
+                self.log("Creating desktop shortcut...")
+                desktop = Path(winshell.desktop())
+                desktop_link = desktop / f"{APP_NAME}.lnk"
+                
+                shortcut = shell.CreateShortCut(str(desktop_link))
                 shortcut.Targetpath = str(target)
-                shortcut.WorkingDirectory = str(wDir)
-                shortcut.IconLocation = str(icon)
+                shortcut.WorkingDirectory = wDir
+                shortcut.IconLocation = icon
                 shortcut.save()
-                self.log("Shortcut created.")
+
+                # 2. Start Menu Shortcut
+                self.log("Creating Start Menu shortcut...")
+                start_menu = Path(winshell.programs())
+                app_programs_folder = start_menu / APP_NAME
+                app_programs_folder.mkdir(parents=True, exist_ok=True)
+                
+                start_menu_link = app_programs_folder / f"{APP_NAME}.lnk"
+                shortcut = shell.CreateShortCut(str(start_menu_link))
+                shortcut.Targetpath = str(target)
+                shortcut.WorkingDirectory = wDir
+                shortcut.IconLocation = icon
+                shortcut.save()
+
+                # 3. Uninstaller in Start Menu
+                uninstaller_link = app_programs_folder / "Uninstall YT-Downloader.lnk"
+                uninstaller_target = INSTALL_DIR / "uninstaller.exe"
+                shortcut = shell.CreateShortCut(str(uninstaller_link))
+                shortcut.Targetpath = str(uninstaller_target)
+                shortcut.WorkingDirectory = wDir
+                shortcut.save()
+
+                self.log("Shortcuts created successfully.")
             except Exception as e:
-                self.log(f"Failed to create shortcut: {e}. You may need to install 'pywin32' and 'winshell'.")
+                self.log(f"Failed to create shortcuts: {e}")
 
     def start_installation(self):
         if not is_admin():
