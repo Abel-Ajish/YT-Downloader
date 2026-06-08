@@ -1,7 +1,7 @@
 # YouTube Audio/Video Downloader
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/Abel-Ajish/YT-Downloader)
-[![Version](https://img.shields.io/badge/version-1.0.4-blue)](https://github.com/Abel-Ajish/YT-Downloader/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue)](https://github.com/Abel-Ajish/YT-Downloader/releases)
 [![Downloads](https://img.shields.io/badge/downloads-view-orange)](https://github.com/Abel-Ajish/YT-Downloader/releases)
 
 A production-ready, high-performance YouTube downloader with a modern UI, built with Python, CustomTkinter, and yt-dlp.
