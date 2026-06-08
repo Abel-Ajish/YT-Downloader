@@ -23,7 +23,7 @@ logger = setup_logging()
 
 # Constants
 GITHUB_REPO = "Abel-Ajish/YT-Downloader"
-VERSION = "v1.0.4"
+VERSION = "v1.1.0"
 
 class MegaDownloader(ctk.CTk):
     def __init__(self):
