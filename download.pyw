@@ -8,6 +8,10 @@ import time
 import logging
 import traceback
 import requests
+import tempfile
+import hashlib
+import sys
+import webbrowser
 from PIL import Image
 from io import BytesIO
 from pathlib import Path
@@ -17,6 +21,7 @@ from tkinter import filedialog, messagebox
 from logger_config import setup_logging
 from dependency_manager import check_dependencies
 from settings_manager import SettingsManager
+from utils import sanitize_filename, safe_join
 
 # Initialize logging
 logger = setup_logging()
@@ -199,6 +204,13 @@ class MegaDownloader(ctk.CTk):
         self.codec_menu.set(self.settings_mgr.get("preferred_codec", "H.264 (Most Compatible)"))
         self.codec_menu.pack(fill="x")
 
+        # Update channel selector (stable | beta)
+        self.update_channel_label = ctk.CTkLabel(self.adv_left, text="Update Channel:", font=("Arial", 9, "bold"))
+        self.update_channel_label.pack(anchor="w", pady=(8, 0))
+        self.update_channel_menu = ctk.CTkOptionMenu(self.adv_left, values=["stable", "beta"], height=22)
+        self.update_channel_menu.set(self.settings_mgr.get("update_channel", "stable"))
+        self.update_channel_menu.pack(fill="x", pady=(0, 6))
+
         self.adv_right = ctk.CTkFrame(self.adv_content, fg_color="transparent")
         self.adv_right.pack(side="right", fill="both", expand=True, padx=(10, 0))
 
@@ -213,6 +225,14 @@ class MegaDownloader(ctk.CTk):
         self.compat_switch = ctk.CTkSwitch(self.adv_right, text="Safe Mode", font=("Arial", 9))
         if self.settings_mgr.get("no_ffmpeg_enabled"): self.compat_switch.select()
         self.compat_switch.pack(anchor="w")
+
+        # Telemetry opt-in (disabled by default per user policy)
+        self.telemetry_switch = ctk.CTkSwitch(self.adv_right, text="Telemetry Opt-in", font=("Arial", 9))
+        if self.settings_mgr.get("telemetry_opt_in"):
+            self.telemetry_switch.select()
+        else:
+            self.telemetry_switch.deselect()
+        self.telemetry_switch.pack(anchor="w", pady=(6, 0))
 
         # 4. Progress Statistics Tracking Panel
         self.stats_frame = ctk.CTkFrame(self.main_container, height=40, fg_color="transparent")
@@ -426,29 +446,40 @@ class MegaDownloader(ctk.CTk):
             try:
                 total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                 downloaded = d.get('downloaded_bytes', 0)
-                
-                if total > 0:
-                    percent = downloaded / total
-                    self.progress_bar.set(percent)
-                
+
                 speed = d.get('_speed_str', 'Uncalculating')
                 eta = d.get('_eta_str', '--:--')
                 percent_str = d.get('_percent_str', '0.0%')
-                
-                self.speed_lbl.configure(text=f"Speed: {speed.strip()}")
-                self.eta_lbl.configure(text=f"Time Left: {eta.strip()}")
-                self.status_label.configure(text=f"Downloading Components... {percent_str.strip()}", text_color="#1c7ed6")
+
+                def _update_progress():
+                    try:
+                        if total > 0:
+                            percent = downloaded / total
+                            self.progress_bar.set(percent)
+                        self.speed_lbl.configure(text=f"Speed: {speed.strip()}")
+                        self.eta_lbl.configure(text=f"Time Left: {eta.strip()}")
+                        self.status_label.configure(text=f"Downloading Components... {percent_str.strip()}", text_color="#1c7ed6")
+                    except Exception:
+                        logger.debug("UI update failed in progress hook")
+
+                self.after(0, _update_progress)
             except Exception as e:
                 logger.debug(f"Hook error: {e}")
         elif d['status'] == 'finished':
-            self.progress_bar.set(1.0)
-            self.status_label.configure(text="Assembling streams & applying modifications...", text_color="orange")
+            def _update_finished():
+                try:
+                    self.progress_bar.set(1.0)
+                    self.status_label.configure(text="Assembling streams & applying modifications...", text_color="orange")
+                except Exception:
+                    logger.debug("UI update failed on finished hook")
+
+            self.after(0, _update_finished)
 
     def trigger_download(self):
         # Dispatched to a separate runtime thread to block interface hanging
         threading.Thread(target=self.run_download, daemon=True).start()
 
-    def run_download(self, retry_with_fallback=False):
+    def run_download(self, retry_with_fallback=False, attempt=1):
         url = self.url_entry.get().strip()
         if not url:
             self.status_label.configure(text="Operation Cancelled: URL Entry box is empty!", text_color="#c92a2a")
@@ -456,9 +487,11 @@ class MegaDownloader(ctk.CTk):
 
         self.download_btn.configure(state="disabled")
         
+        retry_limit = self.settings_mgr.get('download_retry_count', 2)
         if retry_with_fallback:
-            self.status_label.configure(text="Primary method failed. Attempting Safe Fallback...", text_color="orange")
-            logger.warning(f"Retrying download with fallback for URL: {url}")
+            # Use main-thread-safe update
+            self.after(0, lambda: self.status_label.configure(text="Primary method failed. Attempting Safe Fallback...", text_color="orange"))
+            logger.warning(f"Retrying download with fallback for URL: {url} (attempt {attempt})")
         else:
             self.status_label.configure(text="Connecting to streaming servers...", text_color="orange")
             self.progress_bar.set(0.0)
@@ -556,7 +589,13 @@ class MegaDownloader(ctk.CTk):
                     self.save_to_history(info.get('title', f"Playlist: {url[:20]}..."))
                     self.perform_post_action(self.save_dir)
                 else:
-                    # Get the final filename from info
+                    # Preserve original title for history and UI
+                    original_title = info.get('title', 'Unknown')
+                    # Sanitize title to create a filesystem-safe filename
+                    safe_title = sanitize_filename(original_title)
+                    info['title'] = safe_title
+
+                    # Get the final filename from info (uses sanitized title)
                     file_path = ydl.prepare_filename(info)
                     
                     if "Thumbnail" in media_type:
@@ -594,31 +633,43 @@ class MegaDownloader(ctk.CTk):
                             file_path = os.path.join(self.save_dir, possible_files[0])
                         else:
                             raise FileNotFoundError(f"Could not locate the downloaded file: {os.path.basename(file_path)}")
-                        
-                    self.status_label.configure(text="Finished! Task Complete.", text_color="#2b8a3e")
-                    self.save_to_history(info.get('title', 'Unknown'))
+                    # Verify file integrity (basic check: non-zero size)
+                    try:
+                        size = os.path.getsize(file_path)
+                        if size == 0:
+                            raise IOError("Downloaded file has zero size")
+                    except Exception as fexc:
+                        logger.warning(f"Download verification failed for {file_path}: {fexc}")
+                        raise
+
+                    # Success
+                    self.after(0, lambda: self.status_label.configure(text="Finished! Task Complete.", text_color="#2b8a3e"))
+                    # Use the original (unsanitized) title in history for readability
+                    self.save_to_history(original_title)
                     self.perform_post_action(file_path)
                     
         except Exception as e:
             logger.error(f"Download attempt failed: {e}")
-            
-            if not retry_with_fallback:
-                # First failure: Attempt fallback automatically
-                logger.info("Initiating automatic fallback retry...")
-                self.run_download(retry_with_fallback=True)
-                return # Important: exit the current thread execution
-            
-            # Second failure (after fallback): Show final error
+
+            # If we haven't exhausted attempts, retry. Apply fallback on next attempt if not already using it.
+            if attempt < retry_limit:
+                logger.info(f"Retrying download (attempt {attempt + 1}/{retry_limit})...")
+                # Schedule next attempt in a short delay to avoid tight loops
+                next_fallback = retry_with_fallback or (attempt + 1 > 1)
+                self.after(500, lambda: threading.Thread(target=self.run_download, kwargs={'retry_with_fallback': next_fallback, 'attempt': attempt + 1}, daemon=True).start())
+                return
+
+            # Exhausted retries: present final failure to user
             if isinstance(e, yt_dlp.utils.DownloadError):
-                self.status_label.configure(text="Download Failed! Check URL or availability.", text_color="#c92a2a")
-                messagebox.showerror("Download Error", f"YouTube-DLP encountered an error even in safe mode:\n\n{str(e).split(';')[0]}")
+                self.after(0, lambda: self.status_label.configure(text="Download Failed! Check URL or availability.", text_color="#c92a2a"))
+                self.after(0, lambda: messagebox.showerror("Download Error", f"YouTube-DLP encountered an error after {retry_limit} attempts:\n\n{str(e).split(';')[0]}"))
             elif isinstance(e, ValueError):
-                self.status_label.configure(text="Invalid Input!", text_color="#c92a2a")
-                messagebox.showwarning("Input Error", str(e))
+                self.after(0, lambda: self.status_label.configure(text="Invalid Input!", text_color="#c92a2a"))
+                self.after(0, lambda: messagebox.showwarning("Input Error", str(e)))
             else:
                 logger.error(traceback.format_exc())
-                self.status_label.configure(text="Execution Broken! Check logs.", text_color="#c92a2a")
-                messagebox.showerror("Critical Error", f"An unexpected error occurred after fallback attempt:\n{str(e)}")
+                self.after(0, lambda: self.status_label.configure(text="Execution Broken! Check logs.", text_color="#c92a2a"))
+                self.after(0, lambda: messagebox.showerror("Critical Error", f"An unexpected error occurred after {retry_limit} attempts:\n{str(e)}"))
         finally:
             # Only reset button and labels if we aren't about to retry
             if not (not retry_with_fallback and 'e' in locals()):
@@ -663,29 +714,241 @@ class MegaDownloader(ctk.CTk):
             else:
                 logger.warning("Shutdown not supported on this OS via this app.")
 
+    def _run_in_main_thread(self, fn, *args, **kwargs):
+        """Run a blocking function (like messagebox.askyesno) on the main thread and return its result."""
+        ev = threading.Event()
+        result = {'value': None}
+
+        def _call():
+            try:
+                result['value'] = fn(*args, **kwargs)
+            finally:
+                ev.set()
+
+        # Schedule on main thread
+        self.after(0, _call)
+        ev.wait()
+        return result['value']
+
     def check_updates(self):
         def run_check():
             try:
                 self.update_btn.configure(state="disabled", text="Checking...")
-                api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-                response = requests.get(api_url, timeout=10)
-                response.raise_for_status()
-                data = response.json()
-                
-                latest_version = data.get("tag_name", VERSION)
-                
-                if latest_version != VERSION:
-                    if messagebox.askyesno("Update Available", f"A new version ({latest_version}) is available!\n\nWould you like to visit the download page?"):
-                        import webbrowser
-                        webbrowser.open(data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases"))
+
+                api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
+                # Simple retry loop for transient network errors
+                releases = None
+                attempts = 0
+                while attempts < 3:
+                    try:
+                        response = requests.get(api_url, timeout=12)
+                        response.raise_for_status()
+                        releases = response.json()
+                        break
+                    except requests.exceptions.RequestException as re:
+                        attempts += 1
+                        logger.warning(f"Update check network attempt {attempts} failed: {re}")
+                        time.sleep(1 + attempts)
+                if releases is None:
+                    logger.error("Update check failed after retries")
+                    self._run_in_main_thread(messagebox.showerror, "Update Error", "Could not check for updates. Please check your internet connection and try again.")
+                    return
+
+                channel = self.settings_mgr.get("update_channel", "stable")
+                chosen = None
+                if channel == "stable":
+                    for r in releases:
+                        if not r.get('prerelease'):
+                            chosen = r
+                            break
                 else:
-                    messagebox.showinfo("Update Check", f"You are running the latest version ({VERSION}).")
-                    
+                    for r in releases:
+                        if r.get('prerelease'):
+                            chosen = r
+                            break
+
+                if not chosen:
+                    # Handle the case where user has no stable releases yet but does have prereleases
+                    if channel == 'stable':
+                        prereleases = [r for r in releases if r.get('prerelease')]
+                        if prereleases:
+                            use_pr = self._run_in_main_thread(messagebox.askyesno, "No Stable Release Found", "No stable releases were found for this repository — your releases page currently contains only prereleases.\n\nWould you like to inspect/install the latest prerelease instead?")
+                            if use_pr:
+                                chosen = prereleases[0]
+                            else:
+                                return
+                        else:
+                            self._run_in_main_thread(messagebox.showinfo, "Update Check", f"No release found for channel: {channel}")
+                            return
+                    else:
+                        self._run_in_main_thread(messagebox.showinfo, "Update Check", f"No release found for channel: {channel}")
+                        return
+
+                latest_version = chosen.get('tag_name', VERSION)
+                if latest_version == VERSION:
+                    self._run_in_main_thread(messagebox.showinfo, "Update Check", f"You are running the latest version ({VERSION}) for channel '{channel}'.")
+                    return
+
+                # Find an .exe asset to download (prefer Setup- or YT-Downloader)
+                asset = None
+                for a in chosen.get('assets', []):
+                    name = a.get('name', '').lower()
+                    if name.endswith('.exe') and ('setup' in name or 'yt-downloader' in name or 'yt_downloader' in name):
+                        asset = a
+                        break
+                if not asset:
+                    # fallback: first .exe
+                    for a in chosen.get('assets', []):
+                        if a.get('name', '').lower().endswith('.exe'):
+                            asset = a
+                            break
+
+                if not asset:
+                    self._run_in_main_thread(messagebox.showerror, "Update Error", "No installer asset (.exe) found in the selected release.")
+                    return
+
+                download_url = asset.get('browser_download_url')
+                digest = asset.get('digest') or ''
+                expected_hash = None
+                if digest.startswith('sha256:'):
+                    expected_hash = digest.split(':', 1)[1]
+
+                # Ask user for consent to download and install
+                proceed = self._run_in_main_thread(messagebox.askyesno, "Update Available", f"Version {latest_version} is available on channel '{channel}'.\n\nDo you want to download and install it now?")
+                if not proceed:
+                    return
+
+                # Download to temp file
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(asset.get('name', 'installer.exe'))[1])
+                tmp_path = tmp.name
+                try:
+                    with requests.get(download_url, stream=True, timeout=30) as r:
+                        r.raise_for_status()
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:
+                                tmp.write(chunk)
+                    tmp.close()
+
+                    # Verify checksum if available
+                    if expected_hash:
+                        h = hashlib.sha256()
+                        with open(tmp_path, 'rb') as f:
+                            for cb in iter(lambda: f.read(65536), b''):
+                                h.update(cb)
+                        if h.hexdigest().lower() != expected_hash.lower():
+                            os.remove(tmp_path)
+                            self._run_in_main_thread(messagebox.showerror, "Update Error", "Checksum mismatch for downloaded installer. Aborting.")
+                            return
+                    else:
+                        # Warn user when no checksum is available
+                        warn = self._run_in_main_thread(messagebox.askyesno, "No Checksum", "No checksum available for this asset. Proceed with installation? (Not recommended)")
+                        if not warn:
+                            try:
+                                os.remove(tmp_path)
+                            except Exception:
+                                pass
+                            return
+
+                    # Decide how to run the downloaded exe:
+                    # - If it's a Setup installer, launch it (installer will handle replacement/elevation)
+                    # - If it's a standalone YT-Downloader.exe and we're running a frozen executable,
+                    #   try to launch updater.py to perform atomic replacement of the running exe.
+                    asset_name = asset.get('name', '').lower()
+
+                    def _try_launch_updater(new_path, target_exe_path):
+                        """Try to invoke updater.py to atomically replace target_exe_path with new_path.
+                        Returns True if the updater process was started, False otherwise."""
+                        updater_script = Path(__file__).resolve().parent / 'updater.py'
+                        if not updater_script.exists():
+                            return False
+
+                        # Try a few common Python launchers. On Windows 'py' is usually available.
+                        candidates = []
+                        if sys.platform.startswith('win'):
+                            candidates = ['py', 'python']
+                        else:
+                            # Prefer the current interpreter if it's a real Python (not a bundled exe)
+                            if not getattr(sys, 'frozen', False):
+                                candidates = [sys.executable]
+                            candidates += ['python3', 'python']
+
+                        for launcher in candidates:
+                            try:
+                                subprocess.Popen([launcher, str(updater_script), '--new', str(new_path), '--target', str(target_exe_path), '--wait-pid', str(os.getpid()), '--launch'], close_fds=True)
+                                return True
+                            except Exception:
+                                continue
+                        return False
+
+                    launched = False
+                    try:
+                        if 'setup' in asset_name or 'setup-yt' in asset_name:
+                            # Installer: launch it normally
+                            if sys.platform.startswith('win'):
+                                os.startfile(tmp_path)
+                            elif sys.platform == 'darwin':
+                                subprocess.Popen(['open', tmp_path])
+                            else:
+                                subprocess.Popen([tmp_path])
+                            launched = True
+                        else:
+                            # Standalone exe. If running as a frozen exe, attempt atomic replacement via updater.
+                            current_exe = Path(sys.executable) if getattr(sys, 'frozen', False) else None
+                            if current_exe and current_exe.exists():
+                                # Attempt to run updater.py to replace the running exe
+                                ok = _try_launch_updater(tmp_path, current_exe)
+                                if ok:
+                                    self._run_in_main_thread(messagebox.showinfo, "Updater Started", "Updater started to replace the application. The app will now exit to allow the update.")
+                                    # Let the updater wait for our PID to exit, then we exit
+                                    self.after(200, lambda: self.quit())
+                                    launched = True
+                                else:
+                                    # Fallback: launch the downloaded exe and inform user
+                                    if sys.platform.startswith('win'):
+                                        os.startfile(tmp_path)
+                                    else:
+                                        subprocess.Popen([tmp_path])
+                                    launched = True
+                            else:
+                                # Not running a frozen exe (e.g., running from source). Launch the downloaded exe as best-effort.
+                                if sys.platform.startswith('win'):
+                                    os.startfile(tmp_path)
+                                else:
+                                    subprocess.Popen([tmp_path])
+                                launched = True
+                    except Exception as exc:
+                        logger.exception(f"Failed to launch installer/updater: {exc}")
+                        # As a last resort, try to launch the file directly
+                        try:
+                            if sys.platform.startswith('win'):
+                                os.startfile(tmp_path)
+                            else:
+                                subprocess.Popen([tmp_path])
+                            launched = True
+                        except Exception:
+                            launched = False
+
+                    if not launched:
+                        self._run_in_main_thread(messagebox.showerror, "Update Error", "Failed to launch updater or installer. Please run the downloaded installer manually.")
+
+                    # Inform and exit so installer can update application files
+                    self._run_in_main_thread(messagebox.showinfo, "Installer Launched", "The installer was launched. The application will now exit to allow installation.")
+                    self.after(100, lambda: self.quit())
+
+                except Exception as dexc:
+                    logger.exception(f"Update download/install failed: {dexc}")
+                    self._run_in_main_thread(messagebox.showerror, "Update Error", f"Failed to download or launch installer: {dexc}")
+                    try:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                    except Exception:
+                        pass
+
             except Exception as e:
                 logger.error(f"Update check failed: {e}")
-                messagebox.showerror("Update Error", "Could not check for updates. Please check your internet connection.")
+                self._run_in_main_thread(messagebox.showerror, "Update Error", "Could not check for updates. Please check your internet connection.")
             finally:
-                self.update_btn.configure(state="normal", text="Check for Updates")
+                self.after(0, lambda: self.update_btn.configure(state="normal", text="Check for Updates"))
 
         threading.Thread(target=run_check, daemon=True).start()
 
@@ -702,6 +965,15 @@ class MegaDownloader(ctk.CTk):
             "subtitles_enabled": self.sub_switch.get() == 1,
             "no_ffmpeg_enabled": self.compat_switch.get() == 1
         }
+        # Advanced settings persisted
+        try:
+            settings["update_channel"] = self.update_channel_menu.get()
+        except Exception:
+            settings["update_channel"] = self.settings_mgr.get("update_channel", "stable")
+        try:
+            settings["telemetry_opt_in"] = self.telemetry_switch.get() == 1
+        except Exception:
+            settings["telemetry_opt_in"] = self.settings_mgr.get("telemetry_opt_in", False)
         self.settings_mgr.save_settings(settings)
 
     def on_closing(self):

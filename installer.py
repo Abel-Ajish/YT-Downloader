@@ -9,6 +9,7 @@ import time
 import customtkinter as ctk
 from tkinter import messagebox
 from pathlib import Path
+import hashlib
 
 # Constants
 GITHUB_REPO = "Abel-Ajish/YT-Downloader"
@@ -109,6 +110,23 @@ class AppInstaller(ctk.CTk):
             self.log(f"Failed to create directory: {e}")
             raise e
         
+        def _compute_sha256(path):
+            h = hashlib.sha256()
+            with open(path, 'rb') as f:
+                for chunk in iter(lambda: f.read(8192), b''):
+                    h.update(chunk)
+            return h.hexdigest()
+
+        def _fetch_expected_hash(url):
+            # Common convention: a .sha256 file beside the release asset
+            try:
+                r = requests.get(url + '.sha256', timeout=10)
+                if r.status_code == 200:
+                    return r.text.strip().split()[0]
+            except Exception:
+                return None
+            return None
+
         try:
             # 1. Download Main App
             self.log("Downloading Main Application...")
@@ -119,20 +137,37 @@ class AppInstaller(ctk.CTk):
                 
             total_size = int(r.headers.get('content-length', 0))
             downloaded = 0
-            with open(INSTALL_DIR / "YT-Downloader.exe", 'wb') as f:
+            main_path = INSTALL_DIR / "YT-Downloader.exe"
+            with open(main_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
                     downloaded += len(chunk)
                     if total_size > 0:
                         self.progress_bar.set(0.3 + (downloaded / total_size) * 0.5)
+
+            # Verify SHA256 if available
+            expected = _fetch_expected_hash(APP_EXE_URL)
+            if expected:
+                actual = _compute_sha256(main_path)
+                if actual.lower() != expected.lower():
+                    self.log(f"Checksum mismatch for main app: expected {expected}, got {actual}")
+                    raise IOError("Downloaded main application failed integrity check")
             
             # 2. Download Uninstaller
             self.log("Downloading Uninstaller...")
             r = requests.get(UNINSTALLER_EXE_URL, stream=True, timeout=30)
             if r.status_code == 200:
-                with open(INSTALL_DIR / "uninstaller.exe", 'wb') as f:
+                uninstaller_path = INSTALL_DIR / "uninstaller.exe"
+                with open(uninstaller_path, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
+
+                expected_u = _fetch_expected_hash(UNINSTALLER_EXE_URL)
+                if expected_u:
+                    actual_u = _compute_sha256(uninstaller_path)
+                    if actual_u.lower() != expected_u.lower():
+                        self.log(f"Checksum mismatch for uninstaller: expected {expected_u}, got {actual_u}")
+                        raise IOError("Downloaded uninstaller failed integrity check")
             else:
                 self.log(f"Warning: Could not download uninstaller (Status {r.status_code})")
             
@@ -203,30 +238,64 @@ class AppInstaller(ctk.CTk):
         self.install_btn.configure(state="disabled", text="INSTALLING...")
         threading.Thread(target=self.run_install_process, daemon=True).start()
 
+    def _run_in_main_thread(self, fn, *args, **kwargs):
+        """Run a blocking function (like messagebox) on the main thread and wait for the result."""
+        ev = threading.Event()
+        result = {'value': None}
+
+        def _call():
+            try:
+                result['value'] = fn(*args, **kwargs)
+            finally:
+                ev.set()
+
+        self.after(0, _call)
+        ev.wait()
+        return result['value']
+
     def run_install_process(self):
         try:
             # 0. Check if already installed and ask to upgrade/reinstall
             if (INSTALL_DIR / "YT-Downloader.exe").exists():
                 self.log("Existing installation detected.")
-                if not messagebox.askyesno("Already Installed", f"{APP_NAME} is already installed. Do you want to upgrade/reinstall it?"):
+                if not self._run_in_main_thread(messagebox.askyesno, "Already Installed", f"{APP_NAME} is already installed. Do you want to upgrade/reinstall it?"):
                     self.log("Installation cancelled by user.")
-                    self.install_btn.configure(state="normal", text="Start Installation")
+                    self.after(0, lambda: self.install_btn.configure(state="normal", text="Start Installation"))
                     return
                 self.log("Proceeding with upgrade/reinstall...")
 
             if not self.check_python():
-                if messagebox.askyesno("Python Missing", "Python is required but not found. Install it now?"):
+                if self._run_in_main_thread(messagebox.askyesno, "Python Missing", "Python is required but not found. Install it now?"):
                     if not self.install_python():
-                        messagebox.showerror("Error", "Python installation failed. Please install it manually.")
+                        self._run_in_main_thread(messagebox.showerror, "Error", "Python installation failed. Please install it manually.")
                         return
             
             self.download_app_files()
+
+            # Ensure updater helper (updater.py) is bundled into the install dir so
+            # the application can perform atomic updates for standalone exe installs.
+            try:
+                src_updater = Path(__file__).resolve().parent / 'updater.py'
+                if src_updater.exists():
+                    dst = INSTALL_DIR / 'updater.py'
+                    shutil.copy2(str(src_updater), str(dst))
+                    # On POSIX make executable; on Windows it's fine as-is
+                    try:
+                        dst.chmod(0o755)
+                    except Exception:
+                        pass
+                    self.log(f"Bundled updater helper to: {dst}")
+                else:
+                    self.log("No updater.py found beside installer; skipping bundling of updater helper.")
+            except Exception as e:
+                self.log(f"Failed to bundle updater helper: {e}")
+
             self.create_shortcuts()
             
             self.log("Installation Complete!")
             self.status_label.configure(text="Success!", text_color="green")
             
-            if messagebox.askyesno("Finish", "Installation successful! Would you like to launch YT-Downloader now for initialization?"):
+            if self._run_in_main_thread(messagebox.askyesno, "Finish", "Installation successful! Would you like to launch YT-Downloader now for initialization?"):
                 self.launch_app()
                 
             self.destroy()
