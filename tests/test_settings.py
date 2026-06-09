@@ -20,5 +20,8 @@ def test_settings_atomic_write(tmp_path, monkeypatch):
         data = json.load(f)
     assert data.get('test_key') == 'value123'
     # New defaults should include update_channel and telemetry_opt_in
-    assert sm.get('update_channel') in ('stable', 'beta')
+    assert sm.get('update_channel') == 'stable'
     assert sm.get('telemetry_opt_in') is False
+    # Verify temp file from atomic write was cleaned up
+    for tmp in sm.settings_dir.glob('settings.json.tmp*'):
+        assert False, f"Temp file was not cleaned up: {tmp}"

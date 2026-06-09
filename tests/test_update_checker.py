@@ -27,6 +27,13 @@ def test_choose_release_beta_prefers_prerelease():
     assert chosen['tag_name'] == 'v1.0.3-beta'
 
 
+def test_choose_release_invalid_channel_returns_none():
+    r1 = make_release('v1.0.1', False, [])
+    r2 = make_release('v1.0.2', True, [])
+    chosen = update_checker.choose_release([r1, r2], channel='invalid')
+    assert chosen is None
+
+
 def test_find_exe_asset_and_hash_prefers_setup_and_parses_digest():
     asset_setup = {'name': 'Setup-YTDownloader.exe', 'browser_download_url': 'http://x', 'digest': 'sha256:abcd1234'}
     asset_other = {'name': 'YT-Downloader.exe', 'browser_download_url': 'http://y', 'digest': 'sha256:ffee'}

@@ -14,6 +14,7 @@ def main():
     p.add_argument('--retries', type=int, default=2, help='Number of attempts before failing')
 
     args = p.parse_args()
+    args.retries = max(1, args.retries)
 
     url = args.url
     out_dir = os.path.abspath(args.output_dir)
@@ -32,9 +33,11 @@ def main():
     safe_title = sanitize_filename(title)
 
     # Build download options
+    is_playlist = bool(info.get('entries'))
+    outtmpl_template = safe_title + '.%(playlist_index)s-%(id)s.%(ext)s' if is_playlist else safe_title + '.%(ext)s'
     ydl_opts = {
-        'outtmpl': os.path.join(out_dir, safe_title + '.%(ext)s'),
-        'noplaylist': True if not info.get('entries') else False,
+        'outtmpl': os.path.join(out_dir, outtmpl_template),
+        'noplaylist': not is_playlist,
     }
 
     if args.thumbnail:
@@ -42,15 +45,17 @@ def main():
     elif args.audio:
         ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key':'FFmpegExtractAudio','preferredcodec':'mp3','preferredquality':'192'}]})
 
+    # Capture pre-existing files matching safe_title to avoid false positives
+    initial_matches = {f for f in os.listdir(out_dir) if f.startswith(safe_title)}
     attempt = 1
     while attempt <= args.retries:
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-            # basic verification: check for files matching safe_title
+            # basic verification: check for new non-empty files matching safe_title
             found = False
             for f in os.listdir(out_dir):
-                if f.startswith(safe_title):
+                if f.startswith(safe_title) and f not in initial_matches:
                     path = os.path.join(out_dir, f)
                     if os.path.getsize(path) > 0:
                         print(f"Downloaded: {path}")

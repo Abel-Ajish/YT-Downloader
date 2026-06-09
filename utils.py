@@ -26,8 +26,9 @@ def sanitize_filename(name: str, replacement: str = "_", max_length: int = 200) 
     name = name.replace(os.path.sep, replacement)
 
     # Collapse multiple replacements into one
-    rep_escaped = re.escape(replacement)
-    name = re.sub(rf"{rep_escaped}+", replacement, name)
+    if replacement:
+        rep_escaped = re.escape(replacement)
+        name = re.sub(rf"{rep_escaped}+", replacement, name)
 
     # Remove leading dots (avoid hidden files or relative paths)
     name = re.sub(r"^\.+", "", name)

@@ -173,12 +173,13 @@ class AppInstaller(ctk.CTk):
             
             self.progress_bar.set(0.9)
             self.log("All components downloaded successfully.")
+        except IOError:
+            # Integrity check failure - re-raise, don't create zero-byte files
+            self.log("Download integrity check failed - aborting.")
+            raise
         except Exception as e:
             self.log(f"Download error: {e}")
-            self.log("Attempting recovery using local mock files (Dev Mode)...")
-            # For demo/dev purposes, we'll create empty files if the download fails
-            (INSTALL_DIR / "YT-Downloader.exe").touch()
-            (INSTALL_DIR / "uninstaller.exe").touch()
+            raise
 
     def create_shortcuts(self):
         if platform.system() == "Windows":
@@ -302,8 +303,8 @@ class AppInstaller(ctk.CTk):
             
         except Exception as e:
             self.log(f"CRITICAL ERROR: {e}")
-            messagebox.showerror("Installation Error", f"A critical error occurred: {e}")
-            self.install_btn.configure(state="normal")
+            self._run_in_main_thread(lambda: messagebox.showerror("Installation Error", f"A critical error occurred: {e}"))
+            self.after(0, lambda: self.install_btn.configure(state="normal"))
 
     def launch_app(self):
         # Placeholder for launching the app

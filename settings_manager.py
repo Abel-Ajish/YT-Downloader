@@ -43,24 +43,26 @@ class SettingsManager:
         return self.defaults
 
     def save_settings(self, settings):
-        # Update in-memory settings first
-        self.settings.update(settings)
+        new_settings = {**self.settings, **settings}
 
         temp_file = self.settings_file.with_suffix('.tmp')
         try:
             # Write to a temp file first, then atomically replace
             with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(self.settings, f, indent=4, ensure_ascii=False)
+                json.dump(new_settings, f, indent=4, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
             # Atomic replace
             os.replace(str(temp_file), str(self.settings_file))
+            # Only update in-memory after successful persist
+            self.settings = new_settings
         except Exception as exc:
             logger.error(f"Failed to save settings atomically: {exc}")
             # Attempt a best-effort direct write as fallback
             try:
                 with open(self.settings_file, 'w', encoding='utf-8') as f:
-                    json.dump(self.settings, f, indent=4, ensure_ascii=False)
+                    json.dump(new_settings, f, indent=4, ensure_ascii=False)
+                self.settings = new_settings
             except Exception as exc2:
                 logger.critical(f"Failed to write settings fallback: {exc2}")
 

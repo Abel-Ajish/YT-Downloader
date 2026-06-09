@@ -23,10 +23,13 @@ def choose_release(releases: List[Dict[str, Any]], channel: str = "stable") -> O
             if not r.get('prerelease'):
                 return r
         return None
-    else:
+    elif channel == "beta":
         for r in releases:
             if r.get('prerelease'):
                 return r
+        return None
+    else:
+        logger.error(f"Unknown update channel: {channel}")
         return None
 
 

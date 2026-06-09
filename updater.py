@@ -37,9 +37,14 @@ def is_admin() -> bool:
 
 
 def relaunch_elevated(argv: list[str]) -> None:
-    """Relaunch the current Python interpreter with elevated privileges on Windows."""
+    """Relaunch the current Python interpreter with elevated privileges on Windows.
+    Raises RuntimeError if ShellExecuteW returns <= 32 (failure)."""
+    ctypes.windll.shell32.ShellExecuteW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int]
+    ctypes.windll.shell32.ShellExecuteW.restype = ctypes.c_intptr
     params = ' '.join(f'"{a}"' for a in argv[1:])
-    ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, params, None, 1)
+    ret = ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, params, None, 1)
+    if ret <= 32:
+        raise RuntimeError(f"ShellExecuteW failed with code {ret}")
 
 
 def replace_file_atomic(new_path: Path, target_path: Path, max_wait: int = 60) -> None:
@@ -48,10 +53,11 @@ def replace_file_atomic(new_path: Path, target_path: Path, max_wait: int = 60) -
     Creates a backup of the existing target as target_path + '.old'. Both moves use os.replace
     which is atomic on the same filesystem.
     """
-    deadline = time.time() + max_wait
-    # Ensure absolute paths
+    # Ensure absolute paths first
     new_path = new_path.resolve()
     target_path = target_path.resolve()
+
+    deadline = time.time() + max_wait
     backup_path = target_path.with_suffix(target_path.suffix + '.old')
 
     while True:
@@ -64,7 +70,16 @@ def replace_file_atomic(new_path: Path, target_path: Path, max_wait: int = 60) -
                     # Target might be in use; fall through to retry logic
                     raise
             # Move new into target location (atomic on same FS)
-            os.replace(str(new_path), str(target_path))
+            try:
+                os.replace(str(new_path), str(target_path))
+            except Exception:
+                # Restore backup if second replace fails
+                try:
+                    if backup_path.exists():
+                        os.replace(str(backup_path), str(target_path))
+                except Exception:
+                    pass
+                raise
             # If we reach here: success. Attempt to remove backup
             try:
                 if backup_path.exists():

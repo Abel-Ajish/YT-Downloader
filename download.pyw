@@ -482,10 +482,11 @@ class MegaDownloader(ctk.CTk):
     def run_download(self, retry_with_fallback=False, attempt=1):
         url = self.url_entry.get().strip()
         if not url:
-            self.status_label.configure(text="Operation Cancelled: URL Entry box is empty!", text_color="#c92a2a")
+            self.after(0, lambda: self.status_label.configure(text="Operation Cancelled: URL Entry box is empty!", text_color="#c92a2a"))
             return
 
-        self.download_btn.configure(state="disabled")
+        self.after(0, lambda: self.download_btn.configure(state="disabled"))
+        retry_scheduled = False
         
         retry_limit = self.settings_mgr.get('download_retry_count', 2)
         if retry_with_fallback:
@@ -493,8 +494,8 @@ class MegaDownloader(ctk.CTk):
             self.after(0, lambda: self.status_label.configure(text="Primary method failed. Attempting Safe Fallback...", text_color="orange"))
             logger.warning(f"Retrying download with fallback for URL: {url} (attempt {attempt})")
         else:
-            self.status_label.configure(text="Connecting to streaming servers...", text_color="orange")
-            self.progress_bar.set(0.0)
+            self.after(0, lambda: self.status_label.configure(text="Connecting to streaming servers...", text_color="orange"))
+            self.after(0, lambda: self.progress_bar.set(0.0))
             self.start_time = time.time()
 
         media_type = self.type_menu.get()
@@ -585,15 +586,17 @@ class MegaDownloader(ctk.CTk):
                     raise yt_dlp.utils.DownloadError("Failed to extract video information.")
 
                 if 'entries' in info:
-                    self.status_label.configure(text="Playlist Download Successful!", text_color="#2b8a3e")
+                    self.after(0, lambda: self.status_label.configure(text="Playlist Download Successful!", text_color="#2b8a3e"))
                     self.save_to_history(info.get('title', f"Playlist: {url[:20]}..."))
                     self.perform_post_action(self.save_dir)
                 else:
-                    # Preserve original title for history and UI
                     original_title = info.get('title', 'Unknown')
 
                     # Prefer the actual output filename used by yt-dlp (available after download=True)
                     file_path = info.get('_filename') or ydl.prepare_filename(info)
+                    # Sanitize title for history/UI only
+                    safe_title = sanitize_filename(original_title)
+                    info['title'] = safe_title
                     
                     if "Thumbnail" in media_type:
                         # Find the actual thumbnail file as it could be .webp, .jpg, .png
@@ -653,6 +656,7 @@ class MegaDownloader(ctk.CTk):
                 logger.info(f"Retrying download (attempt {attempt + 1}/{retry_limit})...")
                 # Schedule next attempt in a short delay to avoid tight loops
                 next_fallback = retry_with_fallback or (attempt + 1 > 1)
+                retry_scheduled = True
                 self.after(500, lambda: threading.Thread(target=self.run_download, kwargs={'retry_with_fallback': next_fallback, 'attempt': attempt + 1}, daemon=True).start())
                 return
 
@@ -668,11 +672,10 @@ class MegaDownloader(ctk.CTk):
                 self.after(0, lambda: self.status_label.configure(text="Execution Broken! Check logs.", text_color="#c92a2a"))
                 self.after(0, lambda: messagebox.showerror("Critical Error", f"An unexpected error occurred after {retry_limit} attempts:\n{str(e)}"))
         finally:
-            # Only reset button and labels if we aren't about to retry
-            if not (not retry_with_fallback and 'e' in locals()):
-                self.speed_lbl.configure(text="Speed: --")
-                self.eta_lbl.configure(text="Time Left: --")
-                self.download_btn.configure(state="normal")
+            if not retry_scheduled:
+                self.after(0, lambda: self.speed_lbl.configure(text="Speed: --"))
+                self.after(0, lambda: self.eta_lbl.configure(text="Time Left: --"))
+                self.after(0, lambda: self.download_btn.configure(state="normal"))
                 self.save_current_settings()
 
     def open_media(self, path, is_folder=False):
@@ -730,7 +733,7 @@ class MegaDownloader(ctk.CTk):
     def check_updates(self):
         def run_check():
             try:
-                self.update_btn.configure(state="disabled", text="Checking...")
+                self.after(0, lambda: self.update_btn.configure(state="disabled", text="Checking..."))
 
                 api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
                 # Simple retry loop for transient network errors
@@ -824,8 +827,10 @@ class MegaDownloader(ctk.CTk):
                 if not proceed:
                     return
 
-                # Download to temp file
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(asset.get('name', 'installer.exe'))[1])
+                # Download to temp file (same dir as target exe for atomic replace)
+                current_exe = Path(sys.executable) if getattr(sys, 'frozen', False) else None
+                tmp_dir = os.path.dirname(str(current_exe)) if current_exe else None
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(asset.get('name', 'installer.exe'))[1], dir=tmp_dir)
                 tmp_path = tmp.name
                 try:
                     with requests.get(download_url, stream=True, timeout=30) as r:
@@ -899,7 +904,6 @@ class MegaDownloader(ctk.CTk):
                             launched = True
                         else:
                             # Standalone exe. If running as a frozen exe, attempt atomic replacement via updater.
-                            current_exe = Path(sys.executable) if getattr(sys, 'frozen', False) else None
                             if current_exe and current_exe.exists():
                                 # Attempt to run updater.py to replace the running exe
                                 ok = _try_launch_updater(tmp_path, current_exe)
@@ -909,12 +913,8 @@ class MegaDownloader(ctk.CTk):
                                     self.after(200, lambda: self.quit())
                                     launched = True
                                 else:
-                                    # Fallback: launch the downloaded exe and inform user
-                                    if sys.platform.startswith('win'):
-                                        os.startfile(tmp_path)
-                                    else:
-                                        subprocess.Popen([tmp_path])
-                                    launched = True
+                                    # Fallback: show error dialog telling user to run manually
+                                    self._run_in_main_thread(messagebox.showerror, "Update Error", "Could not start the updater. Please run the downloaded installer manually.\n\nFile saved at: " + tmp_path)
                             else:
                                 # Not running a frozen exe (e.g., running from source). Launch the downloaded exe as best-effort.
                                 if sys.platform.startswith('win'):
@@ -934,12 +934,12 @@ class MegaDownloader(ctk.CTk):
                         except Exception:
                             launched = False
 
-                    if not launched:
+                    if launched:
+                        # Inform and exit so installer can update application files
+                        self._run_in_main_thread(messagebox.showinfo, "Installer Launched", "The installer was launched. The application will now exit to allow installation.")
+                        self.after(100, lambda: self.quit())
+                    else:
                         self._run_in_main_thread(messagebox.showerror, "Update Error", "Failed to launch updater or installer. Please run the downloaded installer manually.")
-
-                    # Inform and exit so installer can update application files
-                    self._run_in_main_thread(messagebox.showinfo, "Installer Launched", "The installer was launched. The application will now exit to allow installation.")
-                    self.after(100, lambda: self.quit())
 
                 except Exception as dexc:
                     logger.exception(f"Update download/install failed: {dexc}")
