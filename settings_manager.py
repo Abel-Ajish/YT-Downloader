@@ -19,9 +19,8 @@ class SettingsManager:
             "last_type": "Video (.MP4/.MKV)",
             "playlist_enabled": False,
             "subtitles_enabled": False,
-            "no_ffmpeg_enabled": False
-            ,"download_retry_count": 2,
-            # Update channel controls which GitHub release stream to follow:
+            "no_ffmpeg_enabled": False,
+            "download_retry_count": 2,
             #  - "stable": pick the latest non-prerelease release
             #  - "beta": pick the latest prerelease
             "update_channel": "stable",

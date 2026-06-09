@@ -293,12 +293,12 @@ class AppInstaller(ctk.CTk):
             self.create_shortcuts()
             
             self.log("Installation Complete!")
-            self.status_label.configure(text="Success!", text_color="green")
+            self.after(0, lambda: self.status_label.configure(text="Success!", text_color="green"))
             
             if self._run_in_main_thread(messagebox.askyesno, "Finish", "Installation successful! Would you like to launch YT-Downloader now for initialization?"):
                 self.launch_app()
                 
-            self.destroy()
+            self.after(0, self.destroy)
             
         except Exception as e:
             self.log(f"CRITICAL ERROR: {e}")

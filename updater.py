@@ -49,11 +49,10 @@ def replace_file_atomic(new_path: Path, target_path: Path, max_wait: int = 60) -
     which is atomic on the same filesystem.
     """
     deadline = time.time() + max_wait
-    backup_path = target_path.with_suffix(target_path.suffix + '.old')
-
     # Ensure absolute paths
     new_path = new_path.resolve()
     target_path = target_path.resolve()
+    backup_path = target_path.with_suffix(target_path.suffix + '.old')
 
     while True:
         try:

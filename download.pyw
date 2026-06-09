@@ -11,7 +11,7 @@ import requests
 import tempfile
 import hashlib
 import sys
-import webbrowser
+# import webbrowser  # unused
 from PIL import Image
 from io import BytesIO
 from pathlib import Path
@@ -21,7 +21,7 @@ from tkinter import filedialog, messagebox
 from logger_config import setup_logging
 from dependency_manager import check_dependencies
 from settings_manager import SettingsManager
-from utils import sanitize_filename, safe_join
+from utils import sanitize_filename
 
 # Initialize logging
 logger = setup_logging()
@@ -591,12 +591,9 @@ class MegaDownloader(ctk.CTk):
                 else:
                     # Preserve original title for history and UI
                     original_title = info.get('title', 'Unknown')
-                    # Sanitize title to create a filesystem-safe filename
-                    safe_title = sanitize_filename(original_title)
-                    info['title'] = safe_title
 
-                    # Get the final filename from info (uses sanitized title)
-                    file_path = ydl.prepare_filename(info)
+                    # Prefer the actual output filename used by yt-dlp (available after download=True)
+                    file_path = info.get('_filename') or ydl.prepare_filename(info)
                     
                     if "Thumbnail" in media_type:
                         # Find the actual thumbnail file as it could be .webp, .jpg, .png
@@ -808,11 +805,20 @@ class MegaDownloader(ctk.CTk):
                     return
 
                 download_url = asset.get('browser_download_url')
-                digest = asset.get('digest') or ''
-                expected_hash = None
-                if digest.startswith('sha256:'):
-                    expected_hash = digest.split(':', 1)[1]
 
+                # GitHub release assets do not provide built-in digest fields; try to locate a checksum asset.
+                expected_hash = None
+                checksum_asset = next(
+                    (a for a in chosen.get('assets', [])
+                     if a.get('name', '') == f"{asset.get('name', '')}.sha256"),
+                    None,
+                )
+                if checksum_asset and checksum_asset.get('browser_download_url'):
+                    try:
+                        txt = requests.get(checksum_asset['browser_download_url'], timeout=10).text
+                        expected_hash = txt.strip().split()[0]
+                    except Exception as exc:
+                        logger.warning(f"Failed to fetch checksum asset: {exc}")
                 # Ask user for consent to download and install
                 proceed = self._run_in_main_thread(messagebox.askyesno, "Update Available", f"Version {latest_version} is available on channel '{channel}'.\n\nDo you want to download and install it now?")
                 if not proceed:

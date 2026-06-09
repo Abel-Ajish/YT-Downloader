@@ -19,7 +19,7 @@ def sanitize_filename(name: str, replacement: str = "_", max_length: int = 200) 
     name = re.sub(r"[\x00-\x1f\x7f]+", "", name)
 
     # Replace forbidden characters with replacement
-    forbidden_pattern = r"[<>:\\""/\\\\|?*]"
+    forbidden_pattern = r"[<>:\"/\\|?*]"
     name = re.sub(forbidden_pattern, replacement, name)
 
     # Replace any remaining path separators
@@ -47,8 +47,8 @@ def safe_join(base_dir: str, filename: str) -> str:
 
     Raises ValueError if the resolved path escapes base_dir.
     """
-    base_dir = os.path.abspath(base_dir)
-    candidate = os.path.abspath(os.path.join(base_dir, filename))
-    if not candidate.startswith(base_dir.rstrip(os.path.sep) + os.path.sep) and candidate != base_dir:
+    base_dir = os.path.realpath(base_dir)
+    candidate = os.path.realpath(os.path.join(base_dir, filename))
+    if os.path.commonpath([base_dir, candidate]) != base_dir:
         raise ValueError("Attempted path traversal in filename")
     return candidate
