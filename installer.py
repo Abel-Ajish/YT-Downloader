@@ -180,8 +180,8 @@ class AppInstaller(ctk.CTk):
                 try:
                     if p.exists():
                         p.unlink()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.log(f"Warning: failed to clean up {p}: {e}")
             raise
         except Exception as e:
             self.log(f"Download error: {e}")
@@ -189,8 +189,8 @@ class AppInstaller(ctk.CTk):
                 try:
                     if p.exists():
                         p.unlink()
-                except Exception:
-                    pass
+                except Exception as e2:
+                    self.log(f"Warning: failed to clean up {p}: {e2}")
             raise
 
     def create_shortcuts(self):
@@ -245,8 +245,8 @@ class AppInstaller(ctk.CTk):
             self.log("Requesting Administrator privileges...")
             # Re-run the installer with admin rights
             ctypes.windll.shell32.ShellExecuteW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int]
-            ctypes.windll.shell32.ShellExecuteW.restype = ctypes.c_intptr
-            ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+            ctypes.windll.shell32.ShellExecuteW.restype = ctypes.c_ssize_t
+            ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, subprocess.list2cmdline(sys.argv), None, 1)
             if ret <= 32:
                 self.log(f"Failed to elevate: ShellExecuteW returned {ret}")
                 return

@@ -40,8 +40,8 @@ def relaunch_elevated(argv: list[str]) -> None:
     """Relaunch the current Python interpreter with elevated privileges on Windows.
     Raises RuntimeError if ShellExecuteW returns <= 32 (failure)."""
     ctypes.windll.shell32.ShellExecuteW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int]
-    ctypes.windll.shell32.ShellExecuteW.restype = ctypes.c_intptr
-    params = ' '.join(f'"{a}"' for a in argv[1:])
+    ctypes.windll.shell32.ShellExecuteW.restype = ctypes.c_ssize_t
+    params = subprocess.list2cmdline(argv[1:])
     ret = ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, params, None, 1)
     if ret <= 32:
         raise RuntimeError(f"ShellExecuteW failed with code {ret}")
