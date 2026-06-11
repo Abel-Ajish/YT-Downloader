@@ -15,6 +15,7 @@ a = Analysis(
         ('dependency_manager.py', '.'),
         ('logger_config.py', '.'),
         ('settings_manager.py', '.'),
+        ('updater.py', '.'),
     ],
     hiddenimports=['yt_dlp'],
     hookspath=[],
