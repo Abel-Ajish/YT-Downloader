@@ -174,11 +174,23 @@ class AppInstaller(ctk.CTk):
             self.progress_bar.set(0.9)
             self.log("All components downloaded successfully.")
         except IOError:
-            # Integrity check failure - re-raise, don't create zero-byte files
+            # Integrity check failure - clean up partial files and re-raise
             self.log("Download integrity check failed - aborting.")
+            for p in [INSTALL_DIR / "YT-Downloader.exe", INSTALL_DIR / "uninstaller.exe"]:
+                try:
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
             raise
         except Exception as e:
             self.log(f"Download error: {e}")
+            for p in [INSTALL_DIR / "YT-Downloader.exe", INSTALL_DIR / "uninstaller.exe"]:
+                try:
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
             raise
 
     def create_shortcuts(self):
@@ -232,7 +244,12 @@ class AppInstaller(ctk.CTk):
         if not is_admin():
             self.log("Requesting Administrator privileges...")
             # Re-run the installer with admin rights
-            ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+            ctypes.windll.shell32.ShellExecuteW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int]
+            ctypes.windll.shell32.ShellExecuteW.restype = ctypes.c_intptr
+            ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+            if ret <= 32:
+                self.log(f"Failed to elevate: ShellExecuteW returned {ret}")
+                return
             self.destroy()
             return
 

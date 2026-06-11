@@ -23,5 +23,5 @@ def test_settings_atomic_write(tmp_path, monkeypatch):
     assert sm.get('update_channel') == 'stable'
     assert sm.get('telemetry_opt_in') is False
     # Verify temp file from atomic write was cleaned up
-    for tmp in sm.settings_dir.glob('settings.json.tmp*'):
+    for tmp in sm.settings_dir.glob('*.tmp'):
         assert False, f"Temp file was not cleaned up: {tmp}"
