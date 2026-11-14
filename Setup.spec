@@ -12,6 +12,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (ctk_path, 'customtkinter'),
+        ('updater.py', '.'),
     ],
     hiddenimports=['requests', 'winshell', 'win32com.client'],
     hookspath=[],

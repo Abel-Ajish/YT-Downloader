@@ -13,7 +13,7 @@ def run_command(command):
 
 def build():
     # 1. Verification Step: Ensure all required files exist
-    required_files = ['download.pyw', 'installer.py', 'uninstaller.py', 'YT-Downloader.spec', 'Setup.spec']
+    required_files = ['download.pyw', 'installer.py', 'uninstaller.py', 'YT-Downloader.spec', 'Setup.spec', 'updater.py']
     missing_files = [f for f in required_files if not os.path.exists(f)]
     if missing_files:
         print(f"Error: Missing required files for build: {', '.join(missing_files)}")
